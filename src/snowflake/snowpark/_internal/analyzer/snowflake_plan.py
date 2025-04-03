@@ -51,6 +51,7 @@ from snowflake.snowpark._internal.analyzer.analyzer_utils import (
     create_file_format_statement,
     create_or_replace_dynamic_table_statement,
     create_or_replace_view_statement,
+    create_streaming_pipe_statement,
     create_table_as_select_statement,
     create_table_statement,
     delete_statement,
@@ -94,6 +95,7 @@ from snowflake.snowpark._internal.analyzer.schema_utils import analyze_attribute
 from snowflake.snowpark._internal.analyzer.snowflake_plan_node import (
     DynamicTableCreateMode,
     LogicalPlan,
+    MatchByColumnNameMode,
     ReadFileNode,
     SaveMode,
     SelectFromFileNode,
@@ -1246,6 +1248,29 @@ class SnowflakePlanBuilder:
             ),
             child,
             source_plan,
+        )
+
+    def create_or_replace_streaming_pipe(
+        self,
+        name: str,
+        target_table: str,
+        replace: bool,
+        match_by_column: MatchByColumnNameMode,
+        source_plan: LogicalPlan,
+    ):
+        create_pipe_sql = create_streaming_pipe_statement(
+            name=name,
+            target_table=target_table,
+            replace=replace,
+            match_by_column=match_by_column.value,
+        )
+        return SnowflakePlan(
+            [Query(create_pipe_sql)],
+            create_pipe_sql,
+            [],
+            {},
+            source_plan,
+            session=self.session,
         )
 
     def _merge_file_format_options(

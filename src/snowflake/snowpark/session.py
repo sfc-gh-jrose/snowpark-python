@@ -191,6 +191,7 @@ from snowflake.snowpark.query_history import AstListener, QueryHistory
 from snowflake.snowpark.row import Row
 from snowflake.snowpark.stored_procedure import StoredProcedureRegistration
 from snowflake.snowpark.stored_procedure_profiler import StoredProcedureProfiler
+from snowflake.snowpark.streaming import DataStreamReader
 from snowflake.snowpark.table import Table
 from snowflake.snowpark.table_function import (
     TableFunctionCall,
@@ -2763,6 +2764,12 @@ class Session:
         """Returns a :class:`DataFrameReader` that you can use to read data from various
         supported sources (e.g. a file in a stage) as a DataFrame."""
         return DataFrameReader(self)
+
+    @property
+    def read_stream(self) -> "DataStreamReader":
+        """Returns a :class:`DataStreamReader` that you can use to read data from various
+        supported streaming sources (e.g. a kafka topic) as a DataFrame."""
+        return DataStreamReader(self)
 
     @property
     def session_id(self) -> int:

@@ -1244,6 +1244,21 @@ def create_or_replace_dynamic_table_statement(
     )
 
 
+def create_streaming_pipe_statement(
+    pipe_name: str,
+    target_table: str,
+    match_by_column_name: str,
+    replace: bool,
+):
+    replace_str = "OR REPLACE" if replace else ""
+    return (
+        f"CREATE {replace_str}PIPE {pipe_name} "
+        f"AS COPY INTO {target_table} "
+        "FROM TABLE(DATA_SOURCE(TYPE => 'STREAMING')) "
+        f"MATCH_BY_COLUMN_NAME={match_by_column_name}"
+    )
+
+
 def pivot_statement(
     pivot_column: str,
     pivot_values: Optional[Union[str, List[str]]],

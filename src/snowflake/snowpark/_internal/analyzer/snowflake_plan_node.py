@@ -208,6 +208,12 @@ class SaveMode(Enum):
     TRUNCATE = "truncate"
 
 
+class MatchByColumnNameMode(Enum):
+    CASE_SENSITIVE = "CASE_SENSITIVE"
+    CASE_INSENSITIVE = "CASE_INSENSITIVE"
+    NONE = "NONE"
+
+
 class TableCreationSource(Enum):
     """The enum to indicate the source where SnowflakeCreateTable was created.
 
@@ -414,3 +420,19 @@ class CopyIntoLocationNode(LogicalPlan):
         self.file_format_name = file_format_name
         self.file_format_type = file_format_type
         self.copy_options = copy_options
+
+
+class CreateStreamingPipeNode(LogicalPlan):
+    def __init__(
+        self,
+        name: str,
+        target_table: str,
+        replace: bool,
+        match_by_column: MatchByColumnNameMode,
+        child: LogicalPlan,
+    ) -> None:
+        super().__init__(child)
+        self.name = name
+        self.target_table = target_table
+        self.match_by_column = match_by_column
+        self.replace = replace

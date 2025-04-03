@@ -99,6 +99,7 @@ from snowflake.snowpark._internal.analyzer.snowflake_plan import (
     SnowflakePlanBuilder,
 )
 from snowflake.snowpark._internal.analyzer.snowflake_plan_node import (
+    CreateStreamingPipeNode,
     CopyIntoLocationNode,
     CopyIntoTableNode,
     Limit,
@@ -1324,6 +1325,15 @@ class Analyzer:
                 child=resolved_children[logical_plan.child],
                 source_plan=logical_plan,
                 iceberg_config=logical_plan.iceberg_config,
+            )
+
+        if isinstance(logical_plan, CreateStreamingPipeNode):
+            return self.plan_builder.create_or_replace_streaming_pipe(
+                name=logical_plan.name,
+                target_table=logical_plan.target_table,
+                match_by_column=logical_plan.match_by_column,
+                replace=logical_plan.replace,
+                source_plan=logical_plan,
             )
 
         if isinstance(logical_plan, ReadFileNode):
