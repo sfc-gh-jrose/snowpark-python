@@ -8,10 +8,8 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Union
 import snowflake.snowpark
 from snowflake.snowpark.dataframe import DataFrame
 from snowflake.snowpark.types import StructType
-from snowflake.snowpark._internal.analyzer.unary_plan_node import (
-    CreateStreamingPipeCommand,
-)
 from snowflake.snowpark._internal.analyzer.snowflake_plan_node import (
+    KafkaIngestNode,
     MatchByColumnNameMode,
 )
 
@@ -135,8 +133,8 @@ class DataStreamReader:
         kafka_bootstrap_servers=None,
         kafka_group_id=None,
     ) -> "snowflake.snowpark.dataframe.DataFrame":
-        pipe_plan = CreateStreamingPipeCommand(
-            pipe_name, table_name, MatchByColumnNameMode.CASE_INSENSITIVE
+        pipe_plan = KafkaIngestNode(
+            pipe_name, table_name, True, MatchByColumnNameMode.CASE_INSENSITIVE
         )
 
         return DataFrame(self._session, pipe_plan)

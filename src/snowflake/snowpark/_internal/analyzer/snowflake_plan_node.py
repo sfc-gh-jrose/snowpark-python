@@ -422,17 +422,20 @@ class CopyIntoLocationNode(LogicalPlan):
         self.copy_options = copy_options
 
 
-class CreateStreamingPipeNode(LogicalPlan):
+class StreamingIngestPlan(LogicalPlan):
+    pass
+
+
+class KafkaIngestNode(StreamingIngestPlan):
     def __init__(
         self,
-        name: str,
-        target_table: str,
+        pipe_name: str,
+        table_name: str,
         replace: bool,
         match_by_column: MatchByColumnNameMode,
-        child: LogicalPlan,
     ) -> None:
-        super().__init__(child)
-        self.name = name
-        self.target_table = target_table
+        super().__init__()
+        self.pipe_name = pipe_name
+        self.table_name = table_name
         self.match_by_column = match_by_column
         self.replace = replace

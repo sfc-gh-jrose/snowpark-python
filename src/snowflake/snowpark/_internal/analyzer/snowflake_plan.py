@@ -1250,24 +1250,44 @@ class SnowflakePlanBuilder:
             source_plan,
         )
 
-    def create_or_replace_streaming_pipe(
+    def read_from_kafka(
         self,
-        name: str,
-        target_table: str,
+        pipe_name: str,
+        table_name: str,
         replace: bool,
         match_by_column: MatchByColumnNameMode,
         source_plan: LogicalPlan,
     ):
-        create_pipe_sql = create_streaming_pipe_statement(
-            name=name,
-            target_table=target_table,
-            replace=replace,
-            match_by_column=match_by_column.value,
+        queries = []
+        if not self.session._table_exists([table_name]):
+            queries.append(
+                Query(
+                    create_table_statement(
+                        table_name,
+                        "key binary, value binary, topic string, partition int, offset int, timestamp timestamp, timestampType int",
+                    ),
+                )
+            )
+
+        queries.append(
+            Query(
+                create_streaming_pipe_statement(
+                    name=pipe_name,
+                    table_name=table_name,
+                    replace=replace,
+                    match_by_column_name=match_by_column.value,
+                )
+            )
         )
+
+        read_table_sql = project_statement([], table_name)
+
+        queries.append(Query(read_table_sql))
+
         return SnowflakePlan(
-            [Query(create_pipe_sql)],
-            create_pipe_sql,
-            [],
+            queries,
+            """SELECT "KEY", "VALUE", "TOPIC", "PARTITION", "OFFSET", to_timestamp("TIMESTAMP") AS "TIMESTAMP", "TIMESTAMPTYPE" FROM ( SELECT $1 AS "KEY", $2 AS "VALUE", $3 AS "TOPIC", $4 AS "PARTITION", $5 AS "OFFSET", $6 AS "TIMESTAMP", $7 AS "TIMESTAMPTYPE" FROM  VALUES (NULL :: BINARY, NULL :: BINARY, NULL :: STRING, NULL :: INT, NULL :: BIGINT, NULL :: STRING, NULL :: INT))""",
+            [],  # post actions delete pipe?
             {},
             source_plan,
             session=self.session,
