@@ -109,7 +109,6 @@ from snowflake.snowpark._internal.analyzer.snowflake_plan_node import (
     SnowflakeCreateTable,
     SnowflakeTable,
     SnowflakeValues,
-    # StreamingIngestPlan,
 )
 from snowflake.snowpark._internal.analyzer.sort_expression import SortOrder
 from snowflake.snowpark._internal.analyzer.table_function import (
@@ -890,8 +889,6 @@ class Analyzer:
         if isinstance(logical_plan, Selectable):
             # Selectable doesn't have children. It already has the expr_to_alias dict.
             self.alias_maps_to_use = logical_plan.expr_to_alias.copy()
-        # elif isinstance(logical_plan, StreamingIngestPlan):
-        #     raise ValueError("Queries with streaming sources must be executed with writeStream.start()")
         else:
             if self.session._join_alias_fix:
                 self.alias_maps_to_use = merge_multiple_snowflake_plan_expr_to_alias(

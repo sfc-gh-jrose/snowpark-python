@@ -74,6 +74,8 @@ from snowflake.snowpark._internal.analyzer.snowflake_plan_node import (
     LogicalPlan,
     SaveMode,
     SnowflakeCreateTable,
+    StreamingIngestPlan,
+    StreamingWritePlan,
     TableCreationSource,
 )
 from snowflake.snowpark._internal.analyzer.sort_expression import (
@@ -171,7 +173,10 @@ from snowflake.snowpark.dataframe_analytics_functions import DataFrameAnalyticsF
 from snowflake.snowpark.dataframe_na_functions import DataFrameNaFunctions
 from snowflake.snowpark.dataframe_stat_functions import DataFrameStatFunctions
 from snowflake.snowpark.dataframe_writer import DataFrameWriter
-from snowflake.snowpark.exceptions import SnowparkDataframeException
+from snowflake.snowpark.exceptions import (
+    SnowparkDataframeException,
+    SnowparkClientException,
+)
 from snowflake.snowpark.functions import (
     abs as abs_,
     col,
@@ -341,6 +346,89 @@ def _disambiguate(
         _emit_ast=False,
     )
     return lhs_remapped, rhs_remapped
+
+
+class DataStreamWriter:
+    """"""
+
+    ALLOWED_FORMATS = {"table"}
+
+    def __init__(
+        self, dataframe: "DataFrame", session: "snowflake.snowpark.Session"
+    ) -> None:
+        self._dataframe = dataframe
+        self._session = session
+        self._format = None
+        self._options = dict()
+
+    def format(self, format: str) -> "DataStreamWriter":
+        self._format = format
+        return self
+
+    def option(self, key: str, value: Any) -> "DataStreamWriter":
+        self._options[key] = value
+        return self
+
+    def start(self) -> None:
+        import asyncio
+
+        if self._format is None:
+            raise SnowparkClientException(
+                "Format must be set before starting DataStreamWriter."
+            )
+
+        if self._format not in DataStreamWriter.ALLOWED_FORMATS:
+            raise SnowparkClientException(
+                "Unrecognized DataStreamWriter output format '{self._format}'."
+            )
+
+        plan = self._dataframe._plan
+        too_check = [plan]
+        roots = []
+        while too_check:
+            plan = too_check.pop()
+            if isinstance(plan, StreamingIngestPlan):
+                roots.append(plan)
+            elif hasattr(plan, "child"):
+                too_check.append(plan.child)
+            elif hasattr(plan, "source_plan"):
+                too_check.append(plan.source_plan)
+            elif hasattr(plan, "children"):
+                too_check.extend(plan.children)
+
+        if not roots:
+            raise SnowparkClientException(
+                "Unable to extract streaming sources from plan"
+            )
+
+        # Hack to materialize table once before runnign dynamic plan
+        tdf = self._dataframe.limit(1)
+        tdf._streaming = False
+        tdf.collect()
+
+        if self._format == "table":
+            if "table" not in self._options:
+                raise SnowparkClientException(
+                    "'table' option must be set on DataStreamWriter in order to write to table."
+                )
+
+            warehouse = (
+                self._options.get("warehouse") or self._session.get_current_warehouse()
+            )
+
+            self._session._conn.run_query(
+                f"""
+                CREATE OR REPLACE DYNAMIC TABLE {self._options['table']}
+                TARGET_LAG = '1 minute'
+                WAREHOUSE = {warehouse}
+                AS {self._dataframe.queries['queries'][-1]}
+            """
+            )
+
+        for root in roots:
+            if root._task is not None:
+                # TODO this is not really async
+                asyncio.run(root._task())
 
 
 class DataFrame:
@@ -600,6 +688,8 @@ class DataFrame:
         else:
             self._plan = None
 
+        self._streaming = isinstance(plan, (StreamingIngestPlan, StreamingWritePlan))
+
         if isinstance(plan, (SelectStatement, MockSelectStatement)):
             self._select_statement = plan
             plan.expr_to_alias.update(self._plan.expr_to_alias)
@@ -613,6 +703,7 @@ class DataFrame:
 
         self._reader: Optional["snowflake.snowpark.DataFrameReader"] = None
         self._writer = DataFrameWriter(self, _emit_ast=False)
+        self._streaming_writer = DataStreamWriter(self, session)
 
         self._stat = DataFrameStatFunctions(self)
         self._analytics = DataFrameAnalyticsFunctions(self)
@@ -783,6 +874,11 @@ class DataFrame:
         case_sensitive: bool = True,
         **kwargs: Any,
     ) -> Union[List[Row], AsyncJob]:
+        if self._streaming:
+            raise SnowparkClientException(
+                "Streaming DataFrames must be executed with DataFrame.writeStream.start()"
+            )
+
         # When executing a DataFrame in any method of snowpark (either public or private),
         # we should always call this method instead of collect(), to make sure the
         # query tag is set properly.
@@ -4223,6 +4319,10 @@ class DataFrame:
             self._set_ast_ref(self._writer._ast.dataframe_writer.df)
         return self._writer
 
+    @property
+    def write_stream(self) -> DataStreamWriter:
+        return self._streaming_writer
+
     @df_collect_api_telemetry
     @publicapi
     def copy_into_table(
@@ -6129,6 +6229,7 @@ Query List:
         """
         df = DataFrame(self._session, plan, _ast_stmt=_ast_stmt, _emit_ast=False)
         df._statement_params = self._statement_params
+        df._streaming = self._streaming
 
         if _ast_stmt is not None:
             df._ast_id = _ast_stmt.uid

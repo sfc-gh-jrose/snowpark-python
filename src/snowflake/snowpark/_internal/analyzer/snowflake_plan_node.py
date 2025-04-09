@@ -3,10 +3,14 @@
 # Copyright (c) 2012-2025 Snowflake Computing Inc. All rights reserved.
 #
 
+import asyncio
+import json
+import os
 import sys
+from contextlib import closing
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
-
+from snowflake.ingest import SnowflakeStreamingIngestClient
 from snowflake.snowpark._internal.analyzer.expression import Attribute, Expression
 from snowflake.snowpark._internal.analyzer.query_plan_analysis_utils import (
     PlanNodeCategory,
@@ -423,6 +427,12 @@ class CopyIntoLocationNode(LogicalPlan):
 
 
 class StreamingIngestPlan(LogicalPlan):
+    def __init__(self) -> None:
+        super().__init__()
+        self._task = None
+
+
+class StreamingWritePlan(LogicalPlan):
     pass
 
 
@@ -433,9 +443,81 @@ class KafkaIngestNode(StreamingIngestPlan):
         table_name: str,
         replace: bool,
         match_by_column: MatchByColumnNameMode,
+        account: str,
+        key_file_path: str,
+        topic: str,
+        database: str,
+        schema: str,
+        user: str,
     ) -> None:
         super().__init__()
         self.pipe_name = pipe_name
-        self.table_name = table_name
+        self.table_name = ".".join([database, schema, table_name])
         self.match_by_column = match_by_column
         self.replace = replace
+
+        BATCH_SIZE = 1000
+
+        async def _task():
+            from kafka import KafkaConsumer
+
+            props = {}
+
+            with open(os.path.expanduser(key_file_path)) as key_file:
+                key_data = key_file.read()
+
+            # parameters
+            channel_name = "jrose_channel"
+            database_name = database.upper()
+            schema_name = schema.upper()
+            client_name = "jrose_client"
+
+            props = {
+                "ssl": "on",
+                "url": f"https://{account}.snowflakecomputing.com:443",
+                "private_key": key_data,
+                "port": 443,
+                "host": f"{account}.snowflakecomputing.com",
+                "scheme": "https",
+                "user": user,
+                "account": account,
+                "schema": schema_name,
+                "database": database_name,
+                "ROWSET_DEV_VM_TEST_MODE": "false",
+            }
+
+            with closing(
+                SnowflakeStreamingIngestClient(client_name, **props)
+            ) as client:
+                channel = client.open_channel(
+                    channel_name, database_name, schema_name, pipe_name
+                )
+
+                consumer = KafkaConsumer(topic, auto_offset_reset="earliest")
+                rows = []
+                val = 0
+                for i, msg in enumerate(consumer):
+                    record = {
+                        "key": msg.key,
+                        "value": msg.value.decode("utf-8"),
+                        "topic": msg.topic,
+                        "partition": msg.partition,
+                        "offset": msg.offset,
+                        "timestamp": msg.timestamp // 1000,
+                        "timestampType": msg.timestamp_type,
+                    }
+                    rows.append(json.dumps(record))
+                    end = b"<EOF>" in msg.value
+
+                    if i % BATCH_SIZE == 0 or end:
+                        channel.insert_rows("\n".join(rows), offset_token=str(val))
+                        rows = []
+                        val += 1
+                    if end:
+                        break
+
+                # sleep 10s to get everything committed
+                await asyncio.sleep(10)
+                channel.close()
+
+        self._task = _task

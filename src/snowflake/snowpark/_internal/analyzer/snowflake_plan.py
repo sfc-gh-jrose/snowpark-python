@@ -1259,12 +1259,14 @@ class SnowflakePlanBuilder:
         source_plan: LogicalPlan,
     ):
         queries = []
-        if not self.session._table_exists([table_name]):
+        if not self.session._table_exists(table_name.split(".")):
+            # Should use binary schema, but json might be mangling binary
+            # "key binary, value binary, topic string, partition int, offset int, timestamp timestamp, timestampType int",
             queries.append(
                 Query(
                     create_table_statement(
                         table_name,
-                        "key binary, value binary, topic string, partition int, offset int, timestamp timestamp, timestampType int",
+                        "key string, value string, topic string, partition int, offset int, timestamp timestamp, timestampType int",
                     ),
                 )
             )
@@ -1286,7 +1288,7 @@ class SnowflakePlanBuilder:
 
         return SnowflakePlan(
             queries,
-            """SELECT "KEY", "VALUE", "TOPIC", "PARTITION", "OFFSET", to_timestamp("TIMESTAMP") AS "TIMESTAMP", "TIMESTAMPTYPE" FROM ( SELECT $1 AS "KEY", $2 AS "VALUE", $3 AS "TOPIC", $4 AS "PARTITION", $5 AS "OFFSET", $6 AS "TIMESTAMP", $7 AS "TIMESTAMPTYPE" FROM  VALUES (NULL :: BINARY, NULL :: BINARY, NULL :: STRING, NULL :: INT, NULL :: BIGINT, NULL :: STRING, NULL :: INT))""",
+            """SELECT "KEY", "VALUE", "TOPIC", "PARTITION", "OFFSET", to_timestamp("TIMESTAMP") AS "TIMESTAMP", "TIMESTAMPTYPE" FROM ( SELECT $1 AS "KEY", $2 AS "VALUE", $3 AS "TOPIC", $4 AS "PARTITION", $5 AS "OFFSET", $6 AS "TIMESTAMP", $7 AS "TIMESTAMPTYPE" FROM  VALUES (NULL :: STRING, NULL :: STRING, NULL :: STRING, NULL :: INT, NULL :: BIGINT, NULL :: STRING, NULL :: INT))""",
             [],  # post actions delete pipe?
             {},
             source_plan,

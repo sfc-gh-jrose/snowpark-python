@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Union
 import snowflake.snowpark
 from snowflake.snowpark.dataframe import DataFrame
 from snowflake.snowpark.types import StructType
+from snowflake.snowpark._internal.analyzer.analyzer_utils import unquote_if_quoted
 from snowflake.snowpark._internal.analyzer.snowflake_plan_node import (
     KafkaIngestNode,
     MatchByColumnNameMode,
@@ -96,7 +97,8 @@ class DataStreamReader:
         return self
 
     def option(self, key: str, value: Any) -> "DataStreamReader":
-        raise NotImplementedError()
+        self._options[key] = value
+        return self
 
     def options(self, **options: Any) -> "DataStreamReader":
         raise NotImplementedError()
@@ -125,6 +127,11 @@ class DataStreamReader:
     def _with_parameters_converted(func, params):
         return func(**{k.replace(".", "_").strip().lower(): v for k, v in params})
 
+    def _check_required_options(self, required: List[str]):
+        missing = [req for req in required if req not in self._options]
+        if missing:
+            raise ValueError(f"Missing required options {missing}")
+
     def kafka(
         self,
         table_name,
@@ -133,46 +140,26 @@ class DataStreamReader:
         kafka_bootstrap_servers=None,
         kafka_group_id=None,
     ) -> "snowflake.snowpark.dataframe.DataFrame":
-        pipe_plan = KafkaIngestNode(
-            pipe_name, table_name, True, MatchByColumnNameMode.CASE_INSENSITIVE
-        )
+        self._check_required_options(["key_path"])
 
+        account = unquote_if_quoted(self._session.get_current_account())
+        database = unquote_if_quoted(self._session.get_current_database())
+        schema = unquote_if_quoted(self._session.get_current_schema())
+        user = unquote_if_quoted(self._session.get_current_user())
+
+        pipe_plan = KafkaIngestNode(
+            pipe_name,
+            table_name,
+            True,
+            MatchByColumnNameMode.CASE_INSENSITIVE,
+            account,
+            self._options["key_path"],
+            subscribe,
+            database,
+            schema,
+            user,
+        )
         return DataFrame(self._session, pipe_plan)
-        # import os
-        #
-        # props = {}
-        #
-        # with open(os.path.expanduser("~/.ssh/rsa_key.p8")) as key_file:
-        #     key_data = key_file.read()
-        #
-        # props = {
-        #     **CONNECTION_PARAMETERS,
-        #     **{
-        #         "ssl": "on",
-        #         "url": "https://sfctest0.snowflakecomputing.com:443",
-        #         "private_key": key_data,
-        #         "port": 443,
-        #         "host": "sfctest0.snowflakecomputing.com",
-        #         "scheme": "https",
-        #         "ROWSET_DEV_VM_TEST_MODE": "false",
-        #     },
-        # }
-        #
-        #
-        # session.sql(
-        #     f"""
-        # CREATE OR REPLACE PIPE {pipe_name}
-        # AS
-        #   COPY INTO {raw_table_name}
-        #   FROM TABLE(
-        #       DATA_SOURCE(
-        #           TYPE => 'STREAMING'
-        #   )
-        # )
-        # MATCH_BY_COLUMN_NAME=CASE_INSENSITIVE
-        # """
-        # ).collect()
-        # return props
 
     def table(self, tableName: str) -> "snowflake.snowpark.dataframe.DataFrame":
         raise NotImplementedError()
