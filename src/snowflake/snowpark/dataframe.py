@@ -425,10 +425,11 @@ class DataStreamWriter:
             """
             )
 
-        for root in roots:
-            if root._task is not None:
-                # TODO this is not really async
-                asyncio.run(root._task())
+        async def run_async():
+            asyncio.gather(*[root._task() for root in roots])
+
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(run_async())
 
 
 class DataFrame:

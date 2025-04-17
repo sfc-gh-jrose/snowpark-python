@@ -91,6 +91,7 @@ class DataStreamReader:
                 f"Invalid format '{format}'. Supported formats are {ALLOWED_FORMATS}."
             )
         self._format = fmt
+        return self
 
     def schema(self, schema: Union[StructType, str]) -> "DataStreamReader":
         self._user_schema = schema
@@ -116,7 +117,9 @@ class DataStreamReader:
             )
 
         loader = {
-            "kafka": partial(self._with_parameters_converted(self.kafka, self._options))
+            "kafka": partial(
+                self.kafka, **self._with_parameters_converted(self._options)
+            )
         }.get(self._format)
         if loader is None:
             raise ValueError(f"Invalid format '{self._format}'.")
@@ -124,24 +127,18 @@ class DataStreamReader:
         return loader()
 
     @classmethod
-    def _with_parameters_converted(func, params):
-        return func(**{k.replace(".", "_").strip().lower(): v for k, v in params})
-
-    def _check_required_options(self, required: List[str]):
-        missing = [req for req in required if req not in self._options]
-        if missing:
-            raise ValueError(f"Missing required options {missing}")
+    def _with_parameters_converted(self, params):
+        return {k.replace(".", "_").strip().lower(): v for k, v in params.items()}
 
     def kafka(
         self,
         table_name,
         pipe_name,
+        key_path,
         subscribe=None,
         kafka_bootstrap_servers=None,
         kafka_group_id=None,
     ) -> "snowflake.snowpark.dataframe.DataFrame":
-        self._check_required_options(["key_path"])
-
         account = unquote_if_quoted(self._session.get_current_account())
         database = unquote_if_quoted(self._session.get_current_database())
         schema = unquote_if_quoted(self._session.get_current_schema())
@@ -153,7 +150,7 @@ class DataStreamReader:
             True,
             MatchByColumnNameMode.CASE_INSENSITIVE,
             account,
-            self._options["key_path"],
+            key_path,
             subscribe,
             database,
             schema,
